@@ -16,13 +16,16 @@ scene.add(cube);
 
 camera.position.z = 5;
 
-let initialVelocityMagnitude = 5; // units/s
-let acceleration = -9.8; // m/s^2, gravity acceleration
-let airResistanceCoefficient = 0; // Dimensionless, affects velocity linearly
-let angle = 45; // degrees
-let velocity = new THREE.Vector2(); // Velocity vector
-let position = new THREE.Vector2(); // Position vector, 2D for simplicity
+let initialVelocityMagnitude = 5;
+let acceleration = -9.8; // Assuming downward acceleration like gravity
+let airResistanceCoefficient = 0;
+let angle = 45;
+let velocity = new THREE.Vector2();
+let position = new THREE.Vector2();
 let gravityEnabled = false;
+
+const cubeSize = geometry.parameters.width; // Assuming a cube, all sides are equal
+const halfCubeSize = cubeSize / 2;
 
 const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
 const lineGeometry = new THREE.BufferGeometry();
@@ -30,24 +33,15 @@ const points = [];
 const line = new THREE.Line(lineGeometry, lineMaterial);
 scene.add(line);
 
-// Convert angle and magnitude to velocity vector
-function updateInitialVelocity() {
-    let radianAngle = angle * Math.PI / 180;
-    velocity.x = initialVelocityMagnitude * Math.cos(radianAngle);
-    velocity.y = initialVelocityMagnitude * Math.sin(radianAngle);
-}
-
 document.getElementById('velocity').addEventListener('input', function(event) {
     initialVelocityMagnitude = parseFloat(event.target.value);
     document.getElementById('velocityValue').innerText = event.target.value;
-    updateInitialVelocity();
     resetSimulation();
 });
 
 document.getElementById('angle').addEventListener('input', function(event) {
     angle = parseFloat(event.target.value);
     document.getElementById('angleValue').innerText = angle;
-    updateInitialVelocity();
     resetSimulation();
 });
 
@@ -70,34 +64,58 @@ function resetSimulation() {
     updateInitialVelocity();
 }
 
-function animate(time) {
-    time *= 0.001; // convert time to seconds
-    const deltaTime = Math.min(0.02, time - (lastTime || time)); // Cap max deltaTime to avoid large jumps
-    lastTime = time;
+function updateInitialVelocity() {
+    let radianAngle = angle * Math.PI / 180;
+    velocity.x = initialVelocityMagnitude * Math.cos(radianAngle);
+    velocity.y = initialVelocityMagnitude * Math.sin(radianAngle);
+}
 
-    // Apply gravity
-    if (gravityEnabled) {
-        velocity.y += acceleration * deltaTime;
-    }
+function getVisibleDimensionsAtZDepth(depth, camera) {
+    const cameraOffset = camera.position.z;
+    const vFov = camera.fov * Math.PI / 180;
+    const height = 2 * Math.tan(vFov / 2) * (depth + cameraOffset);
+    const width = height * camera.aspect;
+    return { width, height };
+}
 
-    // Apply air resistance
+function updatePositionAndCheckCollisions(deltaTime) {
+    if (gravityEnabled) velocity.y += acceleration * deltaTime;
     velocity.x -= airResistanceCoefficient * velocity.x * deltaTime;
     velocity.y -= airResistanceCoefficient * velocity.y * deltaTime;
 
-    // Update position
-    position.x += velocity.x * deltaTime;
-    position.y += velocity.y * deltaTime;
+    let nextX = position.x + velocity.x * deltaTime;
+    let nextY = position.y + velocity.y * deltaTime;
 
-    // Prevent cube from going below the "ground"
-    if (gravityEnabled && position.y < 0) {
-        position.y = 0;
-        velocity.y = 0; // Stop vertical motion once it hits the ground
+    const { width, height } = getVisibleDimensionsAtZDepth(cube.position.z, camera);
+
+    // Adjust for cube size in collision detection
+    if (nextX - halfCubeSize <= -width / 2 || nextX + halfCubeSize >= width / 2) {
+        velocity.x *= -1;
     }
+    if (nextY - halfCubeSize <= -height / 2 || nextY + halfCubeSize >= height / 2) {
+        velocity.y *= -1;
+    }
+
+    position.x = Math.min(Math.max(nextX, -width / 2 + halfCubeSize), width / 2 - halfCubeSize);
+    position.y = Math.min(Math.max(nextY, -height / 2 + halfCubeSize), height / 2 - halfCubeSize);
+
+    // Prevent cube from "sinking" into the ground when gravity is enabled
+    if (gravityEnabled && position.y - halfCubeSize < -height / 2) {
+        position.y = -height / 2 + halfCubeSize;
+        velocity.y = 0;
+    }
+}
+
+function animate(time) {
+    time *= 0.001; // Convert time to seconds
+    const deltaTime = Math.min(0.02, time - (lastTime || time)); // Cap max deltaTime to avoid large jumps
+    lastTime = time;
+
+    updatePositionAndCheckCollisions(deltaTime);
 
     cube.position.x = position.x;
     cube.position.y = position.y;
 
-    // Add the new position to the points array and update the line geometry
     points.push(new THREE.Vector3(position.x, position.y, 0));
     lineGeometry.setFromPoints(points);
 
@@ -106,4 +124,5 @@ function animate(time) {
 }
 
 let lastTime;
+updateInitialVelocity(); // Initialize velocity based on initial angle and magnitude
 requestAnimationFrame(animate);
